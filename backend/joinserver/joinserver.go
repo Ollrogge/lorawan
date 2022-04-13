@@ -246,6 +246,10 @@ func (h *handler) handleJoinReq(w http.ResponseWriter, b []byte) {
 		return
 	}
 
+	h.log.WithFields(log.Fields{
+		"joinReqPL": joinReqPL,
+	}).Info("WHAT DID JOIN SERVER RECEIVE ?:")
+
 	ans := handleJoinRequestWrapper(joinReqPL, dk, asKEKLabel, asKEK, joinReqPL.SenderID, nsKEK)
 
 	h.log.WithFields(log.Fields{

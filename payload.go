@@ -159,11 +159,28 @@ func (p *DataPayload) UnmarshalBinary(uplink bool, data []byte) error {
 	return nil
 }
 
+type FidoData struct {
+	Bytes []byte `json:"bytes"`
+}
+
+// MarshalBinary marshals the object in binary form.
+func (p FidoData) MarshalBinary() ([]byte, error) {
+	return p.Bytes, nil
+}
+
+// UnmarshalBinary decodes the object from binary form.
+func (p *FidoData) UnmarshalBinary(data []byte) error {
+	p.Bytes = make([]byte, len(data))
+	copy(p.Bytes, data)
+	return nil
+}
+
 // JoinRequestPayload represents the join-request message payload.
 type JoinRequestPayload struct {
 	JoinEUI  EUI64    `json:"joinEUI"`
 	DevEUI   EUI64    `json:"devEUI"`
 	DevNonce DevNonce `json:"devNonce"`
+	FidoData FidoData `json:"fidoData,omitempty"`
 }
 
 // MarshalBinary marshals the object in binary form.
@@ -186,14 +203,22 @@ func (p JoinRequestPayload) MarshalBinary() ([]byte, error) {
 	}
 	out = append(out, b...)
 
+	b, err = p.FidoData.MarshalBinary()
+	if err != nil {
+		return nil, err
+	}
+	out = append(out, b...)
+
 	return out, nil
 }
 
 // UnmarshalBinary decodes the object from binary form.
 func (p *JoinRequestPayload) UnmarshalBinary(uplink bool, data []byte) error {
-	if len(data) != 18 {
-		return errors.New("lorawan: 18 bytes of data are expected")
-	}
+	/*
+		if len(data) != 18 {
+			return errors.New("lorawan: 18 bytes of data are expected")
+		}
+	*/
 	if err := p.JoinEUI.UnmarshalBinary(data[0:8]); err != nil {
 		return err
 	}
@@ -201,6 +226,9 @@ func (p *JoinRequestPayload) UnmarshalBinary(uplink bool, data []byte) error {
 		return err
 	}
 	if err := p.DevNonce.UnmarshalBinary(data[16:18]); err != nil {
+		return err
+	}
+	if err := p.FidoData.UnmarshalBinary(data[18:]); err != nil {
 		return err
 	}
 

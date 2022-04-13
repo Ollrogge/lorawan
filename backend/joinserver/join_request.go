@@ -1,6 +1,7 @@
 package joinserver
 
 import (
+	"encoding/hex"
 	"fmt"
 
 	"github.com/brocaar/lorawan"
@@ -90,6 +91,8 @@ func setJoinContext(ctx *context) error {
 	switch v := ctx.phyPayload.MACPayload.(type) {
 	case *lorawan.JoinRequestPayload:
 		ctx.devNonce = v.DevNonce
+		ctx.fidoData = v.FidoData
+		fmt.Println("****** Did I do it ?: *******", hex.EncodeToString(ctx.fidoData.Bytes))
 	default:
 		return fmt.Errorf("expected *lorawan.JoinRequestPayload, got %T", ctx.phyPayload.MACPayload)
 	}

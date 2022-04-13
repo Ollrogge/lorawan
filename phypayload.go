@@ -605,6 +605,7 @@ func (p PHYPayload) calculateUplinkJoinMIC(key AES128Key) (MIC, error) {
 	if err != nil {
 		return mic, err
 	}
+	fmt.Println("MARSHALLED DATA BEFORE MIC: ", hex.EncodeToString(b))
 	micBytes = append(micBytes, b...)
 
 	hash, err := cmac.New(key[:])
