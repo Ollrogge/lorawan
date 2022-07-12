@@ -398,6 +398,7 @@ type JoinAcceptPayload struct {
 	DLSettings DLSettings `json:"dlSettings"`
 	RXDelay    uint8      `json:"rxDelay"` // 0=1s, 1=1s, 2=2s, ... 15=15s
 	CFList     *CFList    `json:"cFlist"`
+	FidoData   FidoData   `json:"fidoData,omitempty"`
 }
 
 // MarshalBinary marshals the object in binary form.
@@ -440,6 +441,12 @@ func (p JoinAcceptPayload) MarshalBinary() ([]byte, error) {
 		}
 		out = append(out, b...)
 	}
+
+	b, err = p.FidoData.MarshalBinary()
+	if err != nil {
+		return nil, err
+	}
+	out = append(out, b...)
 
 	return out, nil
 }

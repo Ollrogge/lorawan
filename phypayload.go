@@ -266,6 +266,34 @@ func (p *PHYPayload) SetDownlinkJoinMIC(joinReqType JoinType, joinEUI EUI64, dev
 	return nil
 }
 
+func (p *PHYPayload) SetFidoDownlinkJoinMIC(data *FidoData, key AES128Key) error {
+	var mic MIC
+
+	if p.MACPayload == nil {
+		return errors.New("lorawan: MACPayload most not be empty")
+	}
+
+	hash, err := cmac.New(key[:])
+	if err != nil {
+		return err
+	}
+	if _, err = hash.Write(data.Bytes); err != nil {
+		return err
+	}
+
+	hb := hash.Sum([]byte{})
+	if len(hb) < len(mic) {
+		return fmt.Errorf("lorawan: the hash returned less than %d bytes",
+			len(mic))
+	}
+
+	copy(mic[:], hb[0:len(mic)])
+
+	p.MIC = mic
+
+	return nil
+}
+
 // ValidateDownlinkJoinMIC validates the MIC of a downlink join request.
 func (p PHYPayload) ValidateDownlinkJoinMIC(joinReqType JoinType, joinEUI EUI64, devNonce DevNonce, key AES128Key) (bool, error) {
 	mic, err := p.calculateDownlinkJoinMIC(joinReqType, joinEUI, devNonce, key)
@@ -283,9 +311,11 @@ func (p PHYPayload) ValidateDownlinkJoinMIC(joinReqType JoinType, joinEUI EUI64,
 // Note: for encrypting a join-request response, use NwkKey
 //       for rejoin-request 0, 1, 2 response, use JSEncKey
 func (p *PHYPayload) EncryptJoinAcceptPayload(key AES128Key) error {
-	if _, ok := p.MACPayload.(*JoinAcceptPayload); !ok {
-		return errors.New("lorawan: MACPayload value must be of type *JoinAcceptPayload")
-	}
+	/*
+		if _, ok := p.MACPayload.(*JoinAcceptPayload); !ok {
+			return errors.New("lorawan: MACPayload value must be of type *JoinAcceptPayload")
+		}
+	*/
 
 	pt, err := p.MACPayload.MarshalBinary()
 	if err != nil {
@@ -296,6 +326,10 @@ func (p *PHYPayload) EncryptJoinAcceptPayload(key AES128Key) error {
 	// is made that this should have been DLSettings.
 
 	pt = append(pt, p.MIC[0:4]...)
+	if len(pt)%16 != 0 {
+		// append with empty bytes so that len(data) is a multiple of 16
+		pt = append(pt, make([]byte, 16-(len(pt)%16))...)
+	}
 	if len(pt)%16 != 0 {
 		return errors.New("lorawan: plaintext must be a multiple of 16 bytes")
 	}
@@ -605,7 +639,7 @@ func (p PHYPayload) calculateUplinkJoinMIC(key AES128Key) (MIC, error) {
 	if err != nil {
 		return mic, err
 	}
-	fmt.Println("MARSHALLED DATA BEFORE MIC: ", hex.EncodeToString(b))
+
 	micBytes = append(micBytes, b...)
 
 	hash, err := cmac.New(key[:])
