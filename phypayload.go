@@ -14,6 +14,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"strings"
 
 	"github.com/jacobsa/crypto/cmac"
@@ -263,6 +264,8 @@ func (p *PHYPayload) SetDownlinkJoinMIC(joinReqType JoinType, joinEUI EUI64, dev
 		return err
 	}
 	p.MIC = mic
+
+	log.Println("MIC: ", p.MIC)
 	return nil
 }
 
@@ -273,11 +276,21 @@ func (p *PHYPayload) SetFidoDownlinkJoinMIC(data *FidoData, key AES128Key) error
 		return errors.New("lorawan: MACPayload most not be empty")
 	}
 
+	var micBytes []byte
+
+	b, err := p.MHDR.MarshalBinary()
+	if err != nil {
+		return err
+	}
+	micBytes = append(micBytes, b...)
+
+	micBytes = append(micBytes, data.Bytes...)
+
 	hash, err := cmac.New(key[:])
 	if err != nil {
 		return err
 	}
-	if _, err = hash.Write(data.Bytes); err != nil {
+	if _, err = hash.Write(micBytes); err != nil {
 		return err
 	}
 
@@ -290,6 +303,8 @@ func (p *PHYPayload) SetFidoDownlinkJoinMIC(data *FidoData, key AES128Key) error
 	copy(mic[:], hb[0:len(mic)])
 
 	p.MIC = mic
+
+	log.Println("MIC: ", p.MIC)
 
 	return nil
 }
@@ -322,14 +337,19 @@ func (p *PHYPayload) EncryptJoinAcceptPayload(key AES128Key) error {
 		return err
 	}
 
-	// in the 1.0 spec instead of DLSettings there is RFU field. the assumption
-	// is made that this should have been DLSettings.
-
-	pt = append(pt, p.MIC[0:4]...)
-	if len(pt)%16 != 0 {
-		// append with empty bytes so that len(data) is a multiple of 16
-		pt = append(pt, make([]byte, 16-(len(pt)%16))...)
+	// make sure that after MIC is appended len(pt)%16 = 0
+	log.Println("LENGTH before: ", len(pt))
+	if len(pt)%16 != 12 {
+		for i := 1; i < 16; i++ {
+			if (len(pt)+i)%16 == 12 {
+				pt = append(pt, make([]byte, i)...)
+				break
+			}
+		}
 	}
+	log.Println("LENGTH after: ", len(pt))
+	pt = append(pt, p.MIC[0:4]...)
+
 	if len(pt)%16 != 0 {
 		return errors.New("lorawan: plaintext must be a multiple of 16 bytes")
 	}

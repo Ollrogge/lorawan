@@ -1,10 +1,14 @@
 package joinserver
 
 import (
+	"crypto/elliptic"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log"
+	"math/big"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -16,20 +20,27 @@ import (
 	"github.com/brocaar/lorawan/backend"
 )
 
+const (
+	MakeCredentialBegin  = 0x0
+	MakeCredentialFinish = 0x1
+	GetAssertionBegin    = 0x2
+	GetAssertionFinish   = 0x3
+)
+
 var joinTasks = []func(*context) error{
 	setJoinContext,
 	validateMIC,
 	setJoinNonce,
-	doFidoStuff,
 	setSessionKeys,
 	createJoinAnsPayload,
 }
 
 var fidoJoinTasks = []func(*context) error{
-	setJoinNonce,
 	doFidoStuff,
-	setRootKeys,
-	createFidoJoinAnsPayload,
+	validateMIC,
+	setJoinNonce,
+	setSessionKeys,
+	createJoinAnsPayload,
 }
 
 func handleJoinRequestWrapper(joinReqPL backend.JoinReqPayload, dk DeviceKeys, asKEKLabel string, asKEK []byte, nsKEKLabel string, nsKEK []byte) backend.JoinAnsPayload {
@@ -77,6 +88,7 @@ func handleJoinRequest(joinReqPL backend.JoinReqPayload, dk DeviceKeys, asKEKLab
 		nsKEK:          nsKEK,
 	}
 
+	// first step of joinTasks
 	err := setJoinContext(&ctx)
 	if err != nil {
 		return ctx.joinAnsPayload, err
@@ -157,7 +169,8 @@ func setJoinNonce(ctx *context) error {
 const Url = "http://localhost:8005/fidodata/"
 
 type FidoResponse struct {
-	FidoData []byte `json:"fidoData"`
+	FidoData  []byte `json:"fidoData,omitempty"`
+	PublicKey []byte `json:"publicKey,omitempty"`
 }
 
 func doFidoStuff(ctx *context) error {
@@ -195,17 +208,40 @@ func doFidoStuff(ctx *context) error {
 		return err
 	}
 
-	// 0x0 to indicate join_accept_1 msg
-	fidoResp.FidoData = append([]byte{0x0}, fidoResp.FidoData...)
+	// todo: check how much space can be saved when leaving out the req_type here
+	// makes resp bigger due to encryption padding
+	// client could know state so not needed
+	var req_type = ctx.fidoData.Bytes[0x0]
+	fidoResp.FidoData = append([]byte{req_type}, fidoResp.FidoData...)
 
 	ctx.fidoData.Bytes = fidoResp.FidoData
 
-	//log.Println("Fido http response: ", fidoResp)
+	log.Println("Fido pub key: ", fidoResp.PublicKey, len(fidoResp.PublicKey))
 
-	return nil
-}
+	//log.Println("Fido http response: ", len(ctx.fidoData.Bytes))
 
-func setRootKeys(ctx *context) error {
+	priv_js := []byte{0xf2, 0x93, 0x93, 0x97, 0x1f, 0x62, 0x2c, 0x8b, 0x1e, 0xb9, 0xec, 0x84, 0x6c, 0x8c, 0x6a, 0xe6, 0xa9, 0x5a, 0xe1, 0xc3, 0xbc, 0x76, 0x27, 0x65, 0xee, 0x7d, 0x1c, 0x18, 0xac, 0x85, 0x55, 0x61}
+	_ = priv_js
+
+	// elliptic curve diffie hellman
+	p256 := elliptic.P256()
+
+	var pub_x big.Int
+	pub_x.SetBytes(fidoResp.PublicKey[:32])
+	var pub_y big.Int
+	pub_y.SetBytes(fidoResp.PublicKey[32:])
+
+	s_x, _ := p256.ScalarMult(&pub_x, &pub_y, priv_js)
+
+	log.Println("Secret: ", hex.EncodeToString(s_x.Bytes()))
+
+	new_keys := sha256.Sum256(s_x.Bytes())
+
+	copy(ctx.deviceKeys.AppKey[:], new_keys[:])
+	copy(ctx.deviceKeys.NwkKey[:], new_keys[16:])
+
+	log.Println("AppKey: ", hex.EncodeToString(ctx.deviceKeys.AppKey[:]))
+	log.Println("NwkKey: ", hex.EncodeToString(ctx.deviceKeys.NwkKey[:]))
 
 	return nil
 }
@@ -255,6 +291,8 @@ func createFidoJoinAnsPayload(ctx *context) error {
 		},
 	}
 
+	//log.Println("Fido data: ", backend.HEXBytes(ctx.fidoData.Bytes))
+
 	if ctx.joinReqPayload.DLSettings.OptNeg {
 		jsIntKey, err := getJSIntKey(ctx.deviceKeys.NwkKey, ctx.devEUI)
 		if err != nil {
@@ -285,7 +323,6 @@ func createFidoJoinAnsPayload(ctx *context) error {
 			},
 		},
 		PHYPayload: backend.HEXBytes(b),
-		// TODO add Lifetime?
 	}
 
 	ctx.joinAnsPayload.AppSKey, err = backend.NewKeyEnvelope(ctx.asKEKLabel, ctx.asKEK, ctx.appSKey)
@@ -321,6 +358,7 @@ func createFidoJoinAnsPayload(ctx *context) error {
 func createJoinAnsPayload(ctx *context) error {
 	var cFList *lorawan.CFList
 	if len(ctx.joinReqPayload.CFList[:]) != 0 {
+		log.Println("Setting cFList")
 		cFList = new(lorawan.CFList)
 		if err := cFList.UnmarshalBinary(ctx.joinReqPayload.CFList[:]); err != nil {
 			return errors.Wrap(err, "unmarshal cflist error")
