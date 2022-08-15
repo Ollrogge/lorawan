@@ -335,6 +335,13 @@ func (p JoinReqPayload) GetBasePayload() BasePayload {
 	return p.BasePayload
 }
 
+type KeyUpdate struct {
+	Set    bool
+	DevEUI lorawan.EUI64
+	NwkKey lorawan.AES128Key
+	AppKey lorawan.AES128Key
+}
+
 // JoinAnsPayload defines the JoinAns message payload.
 type JoinAnsPayload struct {
 	BasePayloadResult
@@ -346,6 +353,7 @@ type JoinAnsPayload struct {
 	NwkSKey      *KeyEnvelope `json:"NwkSKey,omitempty"`      // Mandatory when Result=Success (LoRaWAN 1.0.x)
 	AppSKey      *KeyEnvelope `json:"AppSKey,omitempty"`      // Mandatory when Result=Success and not SessionKeyID
 	SessionKeyID HEXBytes     `json:"SessionKeyID,omitempty"` // Mandatory when Result=Success and not AppSKey
+	KeyUpdate    KeyUpdate    `json:"-"`                      // ignore when encoding. Only used internally
 }
 
 // GetBasePayload returns the base payload.

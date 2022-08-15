@@ -324,7 +324,8 @@ func (p PHYPayload) ValidateDownlinkJoinMIC(joinReqType JoinType, joinEUI EUI64,
 // (since the MIC is part of the encrypted payload).
 //
 // Note: for encrypting a join-request response, use NwkKey
-//       for rejoin-request 0, 1, 2 response, use JSEncKey
+//
+//	for rejoin-request 0, 1, 2 response, use JSEncKey
 func (p *PHYPayload) EncryptJoinAcceptPayload(key AES128Key) error {
 	/*
 		if _, ok := p.MACPayload.(*JoinAcceptPayload); !ok {
@@ -337,18 +338,9 @@ func (p *PHYPayload) EncryptJoinAcceptPayload(key AES128Key) error {
 		return err
 	}
 
-	// make sure that after MIC is appended len(pt)%16 = 0
-	log.Println("LENGTH before: ", len(pt))
-	if len(pt)%16 != 12 {
-		for i := 1; i < 16; i++ {
-			if (len(pt)+i)%16 == 12 {
-				pt = append(pt, make([]byte, i)...)
-				break
-			}
-		}
-	}
-	log.Println("LENGTH after: ", len(pt))
 	pt = append(pt, p.MIC[0:4]...)
+
+	log.Println("Plaintext length: ", len(pt))
 
 	if len(pt)%16 != 0 {
 		return errors.New("lorawan: plaintext must be a multiple of 16 bytes")
@@ -375,7 +367,8 @@ func (p *PHYPayload) EncryptJoinAcceptPayload(key AES128Key) error {
 // key. Note that you need to decrypte before you can validate the MIC.
 //
 // Note: for encrypting a join-request response, use NwkKey
-//       for rejoin-request 0, 1, 2 response, use JSEncKey
+//
+//	for rejoin-request 0, 1, 2 response, use JSEncKey
 func (p *PHYPayload) DecryptJoinAcceptPayload(key AES128Key) error {
 	dp, ok := p.MACPayload.(*DataPayload)
 	if !ok {
@@ -951,11 +944,16 @@ func EncryptFRMPayload(key AES128Key, uplink bool, devAddr DevAddr, fCnt uint32,
 
 // EncryptFOpts encrypts the FOpts mac-commands.
 // For uplink:
-//   Set the aFCntDown to false and use the FCntUp
+//
+//	Set the aFCntDown to false and use the FCntUp
+//
 // For downlink if FPort is not set or equals to 0:
-//   Set the aFCntDown to false and use the NFCntDown
+//
+//	Set the aFCntDown to false and use the NFCntDown
+//
 // For downlink if FPort > 0:
-//   Set the aFCntDown to true and use the AFCntDown
+//
+//	Set the aFCntDown to true and use the AFCntDown
 func EncryptFOpts(nwkSEncKey AES128Key, aFCntDown, uplink bool, devAddr DevAddr, fCnt uint32, data []byte) ([]byte, error) {
 	if len(data) > 15 {
 		return nil, errors.New("lorawan: max size of FOpts is 15 bytes")

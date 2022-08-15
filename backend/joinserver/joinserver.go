@@ -3,6 +3,7 @@
 package joinserver
 
 import (
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -32,6 +33,8 @@ type HandlerConfig struct {
 	GetKEKByLabelFunc         func(label string) ([]byte, error)                // must return an empty slice when no KEK exists for the given label
 	GetASKEKLabelByDevEUIFunc func(devEUI lorawan.EUI64) (string, error)        // must return an empty string when no label exists
 	GetHomeNetIDByDevEUIFunc  func(devEUI lorawan.EUI64) (lorawan.NetID, error) // ErrDevEUINotFound must be returned when the device does not exist
+	UpdateDeviceKeys          func(devEUI lorawan.EUI64, NwkKey lorawan.AES128Key,
+		AppKey lorawan.AES128Key) error
 }
 
 type handler struct {
@@ -247,6 +250,12 @@ func (h *handler) handleJoinReq(w http.ResponseWriter, b []byte) {
 	}
 
 	ans := handleJoinRequestWrapper(joinReqPL, dk, asKEKLabel, asKEK, joinReqPL.SenderID, nsKEK)
+
+	if ans.KeyUpdate.Set {
+		log.Println("UPDATING DEVICE KEYS: ", ans.KeyUpdate.Set, hex.EncodeToString(ans.KeyUpdate.AppKey[:]))
+		h.config.UpdateDeviceKeys(ans.KeyUpdate.DevEUI, ans.KeyUpdate.NwkKey,
+			ans.KeyUpdate.AppKey)
+	}
 
 	h.log.WithFields(log.Fields{
 		"message_type":   ans.BasePayload.MessageType,

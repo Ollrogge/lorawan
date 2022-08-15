@@ -169,7 +169,7 @@ func setJoinNonce(ctx *context) error {
 const Url = "http://localhost:8005/fidodata/"
 
 type FidoResponse struct {
-	FidoData  []byte `json:"fidoData,omitempty"`
+	FidoData  []byte `json:"fidoData"`
 	PublicKey []byte `json:"publicKey,omitempty"`
 }
 
@@ -178,6 +178,7 @@ func doFidoStuff(ctx *context) error {
 		return nil
 	}
 
+	var req_type = ctx.fidoData.Bytes[0x0]
 	data := url.Values{}
 	data.Set("fidoData", string(ctx.fidoData.Bytes))
 	enc := data.Encode()
@@ -211,34 +212,50 @@ func doFidoStuff(ctx *context) error {
 	// todo: check how much space can be saved when leaving out the req_type here
 	// makes resp bigger due to encryption padding
 	// client could know state so not needed
-	var req_type = ctx.fidoData.Bytes[0x0]
-	fidoResp.FidoData = append([]byte{req_type}, fidoResp.FidoData...)
+	if len(fidoResp.FidoData) > 0xff {
+		log.Println("ERROR: fido data > 0xff")
+	}
+	var data_len uint8 = uint8(len(fidoResp.FidoData))
 
+	fidoResp.FidoData = append([]byte{data_len}, fidoResp.FidoData...)
+	if len(fidoResp.FidoData)%16 != 0 {
+		fidoResp.FidoData = append(fidoResp.FidoData, make([]byte, 0x10-len(fidoResp.FidoData)%16)...)
+	}
 	ctx.fidoData.Bytes = fidoResp.FidoData
 
-	log.Println("Fido pub key: ", fidoResp.PublicKey, len(fidoResp.PublicKey))
+	// no else branch because if assertion is wrong http request would return != 200
+	if req_type == GetAssertionBegin {
+		log.Println("Fido pub key: ", fidoResp.PublicKey, len(fidoResp.PublicKey))
 
-	//log.Println("Fido http response: ", len(ctx.fidoData.Bytes))
+		if len(fidoResp.PublicKey) < 0x40 {
+			return errors.New("no / invalid fido public key returned")
+		}
 
-	priv_js := []byte{0xf2, 0x93, 0x93, 0x97, 0x1f, 0x62, 0x2c, 0x8b, 0x1e, 0xb9, 0xec, 0x84, 0x6c, 0x8c, 0x6a, 0xe6, 0xa9, 0x5a, 0xe1, 0xc3, 0xbc, 0x76, 0x27, 0x65, 0xee, 0x7d, 0x1c, 0x18, 0xac, 0x85, 0x55, 0x61}
-	_ = priv_js
+		priv_js := []byte{0xf2, 0x93, 0x93, 0x97, 0x1f, 0x62, 0x2c, 0x8b, 0x1e, 0xb9, 0xec, 0x84, 0x6c, 0x8c, 0x6a, 0xe6, 0xa9, 0x5a, 0xe1, 0xc3, 0xbc, 0x76, 0x27, 0x65, 0xee, 0x7d, 0x1c, 0x18, 0xac, 0x85, 0x55, 0x61}
+		//_ = priv_js
 
-	// elliptic curve diffie hellman
-	p256 := elliptic.P256()
+		// elliptic curve diffie hellman
+		p256 := elliptic.P256()
 
-	var pub_x big.Int
-	pub_x.SetBytes(fidoResp.PublicKey[:32])
-	var pub_y big.Int
-	pub_y.SetBytes(fidoResp.PublicKey[32:])
+		var pub_x big.Int
+		pub_x.SetBytes(fidoResp.PublicKey[:32])
+		var pub_y big.Int
+		pub_y.SetBytes(fidoResp.PublicKey[32:])
 
-	s_x, _ := p256.ScalarMult(&pub_x, &pub_y, priv_js)
+		s_x, _ := p256.ScalarMult(&pub_x, &pub_y, priv_js)
 
-	log.Println("Secret: ", hex.EncodeToString(s_x.Bytes()))
+		log.Println("Secret: ", hex.EncodeToString(s_x.Bytes()))
 
-	new_keys := sha256.Sum256(s_x.Bytes())
+		new_keys := sha256.Sum256(s_x.Bytes())
 
-	copy(ctx.deviceKeys.AppKey[:], new_keys[:])
-	copy(ctx.deviceKeys.NwkKey[:], new_keys[16:])
+		copy(ctx.deviceKeys.AppKey[:], new_keys[:])
+		copy(ctx.deviceKeys.NwkKey[:], new_keys[16:])
+
+		ctx.joinAnsPayload.KeyUpdate.Set = true
+		ctx.joinAnsPayload.KeyUpdate.DevEUI = ctx.devEUI
+		ctx.joinAnsPayload.KeyUpdate.NwkKey = ctx.deviceKeys.NwkKey
+		ctx.joinAnsPayload.KeyUpdate.AppKey = ctx.deviceKeys.AppKey
+	}
 
 	log.Println("AppKey: ", hex.EncodeToString(ctx.deviceKeys.AppKey[:]))
 	log.Println("NwkKey: ", hex.EncodeToString(ctx.deviceKeys.NwkKey[:]))
@@ -274,82 +291,6 @@ func setSessionKeys(ctx *context) error {
 	ctx.nwkSEncKey, err = getNwkSEncKey(ctx.joinReqPayload.DLSettings.OptNeg, ctx.deviceKeys.NwkKey, ctx.netID, ctx.joinEUI, ctx.joinNonce, ctx.devNonce)
 	if err != nil {
 		return errors.Wrap(err, "get NwkSEncKey error")
-	}
-
-	return nil
-}
-
-// join-accept_1
-func createFidoJoinAnsPayload(ctx *context) error {
-	phy := lorawan.PHYPayload{
-		MHDR: lorawan.MHDR{
-			MType: lorawan.JoinAccept,
-			Major: lorawan.LoRaWANR1,
-		},
-		MACPayload: &lorawan.DataPayload{
-			Bytes: ctx.fidoData.Bytes,
-		},
-	}
-
-	//log.Println("Fido data: ", backend.HEXBytes(ctx.fidoData.Bytes))
-
-	if ctx.joinReqPayload.DLSettings.OptNeg {
-		jsIntKey, err := getJSIntKey(ctx.deviceKeys.NwkKey, ctx.devEUI)
-		if err != nil {
-			return err
-		}
-		if err := phy.SetFidoDownlinkJoinMIC(&ctx.fidoData, jsIntKey); err != nil {
-			return err
-		}
-	} else {
-		if err := phy.SetFidoDownlinkJoinMIC(&ctx.fidoData, ctx.deviceKeys.NwkKey); err != nil {
-			return err
-		}
-	}
-
-	if err := phy.EncryptJoinAcceptPayload(ctx.deviceKeys.NwkKey); err != nil {
-		return err
-	}
-
-	b, err := phy.MarshalBinary()
-	if err != nil {
-		return err
-	}
-
-	ctx.joinAnsPayload = backend.JoinAnsPayload{
-		BasePayloadResult: backend.BasePayloadResult{
-			Result: backend.Result{
-				ResultCode: backend.Success,
-			},
-		},
-		PHYPayload: backend.HEXBytes(b),
-	}
-
-	ctx.joinAnsPayload.AppSKey, err = backend.NewKeyEnvelope(ctx.asKEKLabel, ctx.asKEK, ctx.appSKey)
-	if err != nil {
-		return err
-	}
-
-	if ctx.joinReqPayload.DLSettings.OptNeg {
-		// LoRaWAN 1.1+
-		ctx.joinAnsPayload.FNwkSIntKey, err = backend.NewKeyEnvelope(ctx.nsKEKLabel, ctx.nsKEK, ctx.fNwkSIntKey)
-		if err != nil {
-			return err
-		}
-		ctx.joinAnsPayload.SNwkSIntKey, err = backend.NewKeyEnvelope(ctx.nsKEKLabel, ctx.nsKEK, ctx.sNwkSIntKey)
-		if err != nil {
-			return err
-		}
-		ctx.joinAnsPayload.NwkSEncKey, err = backend.NewKeyEnvelope(ctx.nsKEKLabel, ctx.nsKEK, ctx.nwkSEncKey)
-		if err != nil {
-			return err
-		}
-	} else {
-		// LoRaWAN 1.0.x
-		ctx.joinAnsPayload.NwkSKey, err = backend.NewKeyEnvelope(ctx.nsKEKLabel, ctx.nsKEK, ctx.fNwkSIntKey)
-		if err != nil {
-			return err
-		}
 	}
 
 	return nil
@@ -404,14 +345,28 @@ func createJoinAnsPayload(ctx *context) error {
 		return err
 	}
 
-	ctx.joinAnsPayload = backend.JoinAnsPayload{
-		BasePayloadResult: backend.BasePayloadResult{
-			Result: backend.Result{
-				ResultCode: backend.Success,
+	if ctx.joinAnsPayload.KeyUpdate.Set {
+		ctx.joinAnsPayload = backend.JoinAnsPayload{
+			BasePayloadResult: backend.BasePayloadResult{
+				Result: backend.Result{
+					ResultCode: backend.Success,
+				},
 			},
-		},
-		PHYPayload: backend.HEXBytes(b),
-		// TODO add Lifetime?
+			PHYPayload: backend.HEXBytes(b),
+			KeyUpdate:  ctx.joinAnsPayload.KeyUpdate,
+			// TODO add Lifetime?
+		}
+
+	} else {
+		ctx.joinAnsPayload = backend.JoinAnsPayload{
+			BasePayloadResult: backend.BasePayloadResult{
+				Result: backend.Result{
+					ResultCode: backend.Success,
+				},
+			},
+			PHYPayload: backend.HEXBytes(b),
+			// TODO add Lifetime?
+		}
 	}
 
 	ctx.joinAnsPayload.AppSKey, err = backend.NewKeyEnvelope(ctx.asKEKLabel, ctx.asKEK, ctx.appSKey)
