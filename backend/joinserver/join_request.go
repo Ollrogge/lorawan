@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/brocaar/lorawan"
 	"github.com/pkg/errors"
@@ -102,6 +103,7 @@ func handleJoinRequest(joinReqPL backend.JoinReqPayload, dk DeviceKeys, asKEKLab
 			}
 		}
 	} else {
+		log.Println("Executing normal LoRaWAN jointasks")
 		for _, f := range joinTasks[1:] {
 			if err := f(&ctx); err != nil {
 				return ctx.joinAnsPayload, err
@@ -173,12 +175,18 @@ type FidoResponse struct {
 	PublicKey []byte `json:"publicKey,omitempty"`
 }
 
+var timer time.Time
+
 func doFidoStuff(ctx *context) error {
 	if len(ctx.fidoData.Bytes) == 0x0 {
 		return nil
 	}
 
 	var req_type = ctx.fidoData.Bytes[0x0]
+	if req_type == GetAssertionFinish {
+		elapsed := time.Since(timer)
+		fmt.Println("Device communication took: ", elapsed)
+	}
 	data := url.Values{}
 	data.Set("fidoData", string(ctx.fidoData.Bytes))
 	enc := data.Encode()
@@ -218,14 +226,25 @@ func doFidoStuff(ctx *context) error {
 	var data_len uint8 = uint8(len(fidoResp.FidoData))
 
 	fidoResp.FidoData = append([]byte{data_len}, fidoResp.FidoData...)
+
+	// assure FidoData is a multiple of 16 (for MIC calculation)
 	if len(fidoResp.FidoData)%16 != 0 {
 		fidoResp.FidoData = append(fidoResp.FidoData, make([]byte, 0x10-len(fidoResp.FidoData)%16)...)
 	}
+
+	// device sent public key. Use that one instead of pub key returned from FIDO2 server
+	if len(ctx.fidoData.Bytes) == 64+1 && req_type == GetAssertionBegin {
+		log.Println("Using public key sent by device")
+		fidoResp.PublicKey = ctx.fidoData.Bytes[1:]
+	} else {
+		log.Println("Using public key sent by fido2 server")
+	}
+
 	ctx.fidoData.Bytes = fidoResp.FidoData
 
 	// no else branch because if assertion is wrong http request would return != 200
 	if req_type == GetAssertionBegin {
-		log.Println("Fido pub key: ", fidoResp.PublicKey, len(fidoResp.PublicKey))
+		// log.Println("Fido pub key: ", fidoResp.PublicKey, len(fidoResp.PublicKey))
 
 		if len(fidoResp.PublicKey) < 0x40 {
 			return errors.New("no / invalid fido public key returned")
@@ -259,6 +278,10 @@ func doFidoStuff(ctx *context) error {
 
 	log.Println("AppKey: ", hex.EncodeToString(ctx.deviceKeys.AppKey[:]))
 	log.Println("NwkKey: ", hex.EncodeToString(ctx.deviceKeys.NwkKey[:]))
+
+	if req_type == GetAssertionBegin {
+		timer = time.Now()
+	}
 
 	return nil
 }

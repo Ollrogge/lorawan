@@ -14,7 +14,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"strings"
 
 	"github.com/jacobsa/crypto/cmac"
@@ -265,7 +264,6 @@ func (p *PHYPayload) SetDownlinkJoinMIC(joinReqType JoinType, joinEUI EUI64, dev
 	}
 	p.MIC = mic
 
-	log.Println("MIC: ", p.MIC)
 	return nil
 }
 
@@ -304,8 +302,6 @@ func (p *PHYPayload) SetFidoDownlinkJoinMIC(data *FidoData, key AES128Key) error
 
 	p.MIC = mic
 
-	log.Println("MIC: ", p.MIC)
-
 	return nil
 }
 
@@ -339,8 +335,6 @@ func (p *PHYPayload) EncryptJoinAcceptPayload(key AES128Key) error {
 	}
 
 	pt = append(pt, p.MIC[0:4]...)
-
-	log.Println("Plaintext length: ", len(pt))
 
 	if len(pt)%16 != 0 {
 		return errors.New("lorawan: plaintext must be a multiple of 16 bytes")
