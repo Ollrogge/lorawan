@@ -1,6 +1,7 @@
 package joinserver
 
 import (
+	"crypto/aes"
 	"crypto/elliptic"
 	"crypto/sha256"
 	"encoding/hex"
@@ -168,6 +169,27 @@ func setJoinNonce(ctx *context) error {
 	return nil
 }
 
+func decryptFidoData(data []byte, key lorawan.AES128Key) ([]byte, error) {
+	if len(data)%16 != 0 {
+		msg := fmt.Sprintf("decryptFidoData: data not a multiple of 16: %d", len(data))
+		return nil, errors.New(msg)
+	}
+	block, err := aes.NewCipher(key[:])
+	if err != nil {
+		return nil, err
+	}
+	if block.BlockSize() != 16 {
+		return nil, errors.New("lorawan: block-size of 16 bytes is expected")
+	}
+	plain := make([]byte, len(data))
+	for i := 0; i < len(plain)/16; i++ {
+		offset := i * 16
+		block.Decrypt(plain[offset:offset+16], data[offset:offset+16])
+	}
+
+	return plain, nil
+}
+
 const Url = "http://localhost:8005/fidodata/"
 
 type FidoResponse struct {
@@ -183,10 +205,23 @@ func doFidoStuff(ctx *context) error {
 	}
 
 	var req_type = ctx.fidoData.Bytes[0x0]
+	ctx.fidoReqType = req_type
 	if req_type == GetAssertionFinish {
 		elapsed := time.Since(timer)
 		fmt.Println("Device communication took: ", elapsed)
 	}
+
+	if req_type == GetAssertionFinish {
+		data, err := decryptFidoData(ctx.fidoData.Bytes[1:], ctx.deviceKeys.NwkKey)
+		if err != nil {
+			return err
+		}
+
+		//log.Println("Decrypted fido data", hex.EncodeToString(data))
+
+		ctx.fidoData.Bytes = append([]byte{ctx.fidoData.Bytes[0]}, data[:]...)
+	}
+
 	data := url.Values{}
 	data.Set("fidoData", string(ctx.fidoData.Bytes))
 	enc := data.Encode()
@@ -236,7 +271,8 @@ func doFidoStuff(ctx *context) error {
 	if len(ctx.fidoData.Bytes) == 64+1 && req_type == GetAssertionBegin {
 		log.Println("Using public key sent by device")
 		fidoResp.PublicKey = ctx.fidoData.Bytes[1:]
-	} else {
+		//log.Println("Public key from device: ", hex.EncodeToString(fidoResp.PublicKey))
+	} else if req_type == GetAssertionBegin {
 		log.Println("Using public key sent by fido2 server")
 	}
 
@@ -289,6 +325,11 @@ func doFidoStuff(ctx *context) error {
 func setSessionKeys(ctx *context) error {
 	var err error
 
+	if ctx.fidoReqType == GetAssertionBegin {
+		log.Println("Not deriving session keys since GetAssertionBegin stage")
+		return nil
+	}
+
 	ctx.fNwkSIntKey, err = getFNwkSIntKey(ctx.joinReqPayload.DLSettings.OptNeg, ctx.deviceKeys.NwkKey, ctx.netID, ctx.joinEUI, ctx.joinNonce, ctx.devNonce)
 	if err != nil {
 		return errors.Wrap(err, "get FNwkSIntKey error")
@@ -322,7 +363,6 @@ func setSessionKeys(ctx *context) error {
 func createJoinAnsPayload(ctx *context) error {
 	var cFList *lorawan.CFList
 	if len(ctx.joinReqPayload.CFList[:]) != 0 {
-		log.Println("Setting cFList")
 		cFList = new(lorawan.CFList)
 		if err := cFList.UnmarshalBinary(ctx.joinReqPayload.CFList[:]); err != nil {
 			return errors.Wrap(err, "unmarshal cflist error")

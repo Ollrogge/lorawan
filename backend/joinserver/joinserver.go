@@ -3,7 +3,6 @@
 package joinserver
 
 import (
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -252,7 +251,7 @@ func (h *handler) handleJoinReq(w http.ResponseWriter, b []byte) {
 	ans := handleJoinRequestWrapper(joinReqPL, dk, asKEKLabel, asKEK, joinReqPL.SenderID, nsKEK)
 
 	if ans.KeyUpdate.Set {
-		log.Println("UPDATING DEVICE KEYS: ", ans.KeyUpdate.Set, hex.EncodeToString(ans.KeyUpdate.AppKey[:]))
+		//log.Println("UPDATING DEVICE KEYS: ", ans.KeyUpdate.Set, hex.EncodeToString(ans.KeyUpdate.AppKey[:]))
 		h.config.UpdateDeviceKeys(ans.KeyUpdate.DevEUI, ans.KeyUpdate.NwkKey,
 			ans.KeyUpdate.AppKey)
 	}

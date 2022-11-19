@@ -19,6 +19,7 @@ type context struct {
 	devEUI           lorawan.EUI64
 	joinEUI          lorawan.EUI64
 	fidoData         lorawan.FidoData
+	fidoReqType      byte
 	fNwkSIntKey      lorawan.AES128Key
 	appSKey          lorawan.AES128Key
 	sNwkSIntKey      lorawan.AES128Key
