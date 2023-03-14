@@ -252,6 +252,12 @@ func doFidoStuff(ctx *context) error {
 		return err
 	}
 
+	// Successfully authenticated. We are done
+	if req_type == GetAssertionFinish {
+		ctx.fidoData.Bytes = nil
+		return nil
+	}
+
 	// todo: check how much space can be saved when leaving out the req_type here
 	// makes resp bigger due to encryption padding
 	// client could know state so not needed
@@ -278,39 +284,36 @@ func doFidoStuff(ctx *context) error {
 
 	ctx.fidoData.Bytes = fidoResp.FidoData
 
-	// no else branch because if assertion is wrong http request would return != 200
-	if req_type == GetAssertionBegin {
-		// log.Println("Fido pub key: ", fidoResp.PublicKey, len(fidoResp.PublicKey))
+	// log.Println("Fido pub key: ", fidoResp.PublicKey, len(fidoResp.PublicKey))
 
-		if len(fidoResp.PublicKey) < 0x40 {
-			return errors.New("no / invalid fido public key returned")
-		}
-
-		priv_js := []byte{0xf2, 0x93, 0x93, 0x97, 0x1f, 0x62, 0x2c, 0x8b, 0x1e, 0xb9, 0xec, 0x84, 0x6c, 0x8c, 0x6a, 0xe6, 0xa9, 0x5a, 0xe1, 0xc3, 0xbc, 0x76, 0x27, 0x65, 0xee, 0x7d, 0x1c, 0x18, 0xac, 0x85, 0x55, 0x61}
-		//_ = priv_js
-
-		// elliptic curve diffie hellman
-		p256 := elliptic.P256()
-
-		var pub_x big.Int
-		pub_x.SetBytes(fidoResp.PublicKey[:32])
-		var pub_y big.Int
-		pub_y.SetBytes(fidoResp.PublicKey[32:])
-
-		s_x, _ := p256.ScalarMult(&pub_x, &pub_y, priv_js)
-
-		log.Println("Secret: ", hex.EncodeToString(s_x.Bytes()))
-
-		new_keys := sha256.Sum256(s_x.Bytes())
-
-		copy(ctx.deviceKeys.AppKey[:], new_keys[:])
-		copy(ctx.deviceKeys.NwkKey[:], new_keys[16:])
-
-		ctx.joinAnsPayload.KeyUpdate.Set = true
-		ctx.joinAnsPayload.KeyUpdate.DevEUI = ctx.devEUI
-		ctx.joinAnsPayload.KeyUpdate.NwkKey = ctx.deviceKeys.NwkKey
-		ctx.joinAnsPayload.KeyUpdate.AppKey = ctx.deviceKeys.AppKey
+	if len(fidoResp.PublicKey) < 0x40 {
+		return errors.New("no / invalid fido public key returned")
 	}
+
+	priv_js := []byte{0xf2, 0x93, 0x93, 0x97, 0x1f, 0x62, 0x2c, 0x8b, 0x1e, 0xb9, 0xec, 0x84, 0x6c, 0x8c, 0x6a, 0xe6, 0xa9, 0x5a, 0xe1, 0xc3, 0xbc, 0x76, 0x27, 0x65, 0xee, 0x7d, 0x1c, 0x18, 0xac, 0x85, 0x55, 0x61}
+	//_ = priv_js
+
+	// elliptic curve diffie hellman
+	p256 := elliptic.P256()
+
+	var pub_x big.Int
+	pub_x.SetBytes(fidoResp.PublicKey[:32])
+	var pub_y big.Int
+	pub_y.SetBytes(fidoResp.PublicKey[32:])
+
+	s_x, _ := p256.ScalarMult(&pub_x, &pub_y, priv_js)
+
+	log.Println("Secret: ", hex.EncodeToString(s_x.Bytes()))
+
+	new_keys := sha256.Sum256(s_x.Bytes())
+
+	copy(ctx.deviceKeys.AppKey[:], new_keys[:])
+	copy(ctx.deviceKeys.NwkKey[:], new_keys[16:])
+
+	ctx.joinAnsPayload.KeyUpdate.Set = true
+	ctx.joinAnsPayload.KeyUpdate.DevEUI = ctx.devEUI
+	ctx.joinAnsPayload.KeyUpdate.NwkKey = ctx.deviceKeys.NwkKey
+	ctx.joinAnsPayload.KeyUpdate.AppKey = ctx.deviceKeys.AppKey
 
 	log.Println("AppKey: ", hex.EncodeToString(ctx.deviceKeys.AppKey[:]))
 	log.Println("NwkKey: ", hex.EncodeToString(ctx.deviceKeys.NwkKey[:]))

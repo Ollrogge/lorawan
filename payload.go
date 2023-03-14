@@ -160,7 +160,7 @@ func (p *DataPayload) UnmarshalBinary(uplink bool, data []byte) error {
 }
 
 type FidoData struct {
-	Bytes []byte `json:"bytes"`
+	Bytes []byte `json:"bytes,omitempty"`
 }
 
 // MarshalBinary marshals the object in binary form.
